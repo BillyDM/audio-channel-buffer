@@ -1,24 +1,30 @@
 use alloc::vec::Vec;
 use core::ops::{Index, IndexMut, Range};
+use core::pin::Pin;
 
-use crate::{
-    const_buffer_ref::{as_mut_slices, as_slices, channel_unchecked, channel_unchecked_mut},
-    ChannelBufferRef, ChannelBufferRefMut,
-};
+use crate::{ChannelBufferRef, ChannelBufferRefMut};
 
 /// A memory-efficient buffer of samples with a fixed compile-time number of channels
 /// each with a fixed runtime number of frames (samples in a single channel of audio).
-#[derive(Debug, Clone)]
-pub struct ChannelBuffer<T: Clone + Copy + Default, const CHANNELS: usize> {
-    data: Vec<T>,
+///
+/// This version uses an owned `Vec` as its data source.
+#[derive(Debug)]
+pub struct ChannelBuffer<T: Clone + Copy + Default + Unpin, const CHANNELS: usize> {
+    data: Pin<Vec<T>>,
+    offsets: [*mut T; CHANNELS],
     frames: usize,
 }
 
-impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS> {
+impl<T: Clone + Copy + Default + Unpin, const CHANNELS: usize> ChannelBuffer<T, CHANNELS> {
     /// Create an empty [`ChannelBuffer`] with no allocated capacity.
-    pub const fn empty() -> Self {
+    pub fn empty() -> Self {
+        let mut data = Pin::new(Vec::<T>::new());
+
+        let offsets = core::array::from_fn(|_| data.as_mut_ptr());
+
         Self {
-            data: Vec::new(),
+            data,
+            offsets,
             frames: 0,
         }
     }
@@ -31,12 +37,18 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS
     pub fn new(frames: usize) -> Self {
         let buffer_len = CHANNELS * frames;
 
-        let mut buffer = Vec::new();
-        buffer.reserve_exact(buffer_len);
-        buffer.resize(buffer_len, Default::default());
+        let mut data = Vec::<T>::new();
+        data.reserve_exact(buffer_len);
+        data.resize(buffer_len, Default::default());
+
+        let mut data = Pin::new(data);
+
+        // SAFETY: All of these pointers point to valid memory in the vec.
+        let offsets = unsafe { core::array::from_fn(|ch_i| data.as_mut_ptr().add(ch_i * frames)) };
 
         Self {
-            data: buffer,
+            data,
+            offsets,
             frames,
         }
     }
@@ -52,12 +64,18 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS
     pub unsafe fn new_uninit(frames: usize) -> Self {
         let buffer_len = CHANNELS * frames;
 
-        let mut buffer = Vec::new();
-        buffer.reserve_exact(buffer_len);
-        buffer.set_len(buffer_len);
+        let mut data = Vec::<T>::new();
+        data.reserve_exact(buffer_len);
+        data.set_len(buffer_len);
+
+        let mut data = Pin::new(data);
+
+        // SAFETY: All of these pointers point to valid memory in the vec.
+        let offsets = unsafe { core::array::from_fn(|ch_i| data.as_mut_ptr().add(ch_i * frames)) };
 
         Self {
-            data: buffer,
+            data,
+            offsets,
             frames,
         }
     }
@@ -89,6 +107,23 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS
     }
 
     #[inline(always)]
+    /// Get an immutable reference to the channel at `index`. The slice will have a length
+    /// of `self.frames()`.
+    ///
+    /// # Safety
+    /// `index` must be less than `self.channels()`
+    pub unsafe fn channel_unchecked(&self, index: usize) -> &[T] {
+        // SAFETY:
+        //
+        // * The constructors ensure that the pointed-to data vec has a length of at
+        // least `frames * CHANNELS`.
+        // * The caller upholds that `index` is within bounds.
+        // * The Vec is pinned and cannot be moved, so the pointers are valid for the lifetime
+        // of the struct.
+        core::slice::from_raw_parts(*self.offsets.get_unchecked(index), self.frames)
+    }
+
+    #[inline(always)]
     /// Get a mutable reference to the channel at `index`. The slice will have a length
     /// of `self.frames()`.
     ///
@@ -104,20 +139,6 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS
     }
 
     #[inline(always)]
-    /// Get an immutable reference to the channel at `index`. The slice will have a length
-    /// of `self.frames()`.
-    ///
-    /// # Safety
-    /// `index` must be less than `self.channels()`
-    pub unsafe fn channel_unchecked(&self, index: usize) -> &[T] {
-        // SAFETY:
-        //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // so this is always within range.
-        unsafe { channel_unchecked::<T, CHANNELS>(&self.data, self.frames, index, 0, self.frames) }
-    }
-
-    #[inline(always)]
     /// Get a mutable reference to the channel at `index`. The slice will have a length
     /// of `self.frames()`.
     ///
@@ -126,11 +147,14 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS
     pub unsafe fn channel_unchecked_mut(&mut self, index: usize) -> &mut [T] {
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // so this is always within range.
-        unsafe {
-            channel_unchecked_mut::<T, CHANNELS>(&mut self.data, self.frames, index, 0, self.frames)
-        }
+        // * The constructors ensure that the pointed-to data vec has a length of at
+        // least `frames * CHANNELS`.
+        // * The caller upholds that `index` is within bounds.
+        // * The Vec is pinned and cannot be moved, so the pointers are valid for the lifetime
+        // of the struct.
+        // * `self` is borrowed as mutable, ensuring that no other references to the
+        // data Vec can exist.
+        core::slice::from_raw_parts_mut(*self.offsets.get_unchecked(index), self.frames)
     }
 
     /// Get all channels as immutable slices. Each slice will have a length of `self.frames()`.
@@ -138,9 +162,15 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS
     pub fn as_slices(&self) -> [&[T]; CHANNELS] {
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // so this is always within range.
-        unsafe { as_slices(&self.data, self.frames, 0, self.frames) }
+        // * The constructors ensure that the pointed-to data vec has a length of at
+        // least `frames * CHANNELS`.
+        // * The Vec is pinned and cannot be moved, so the pointers are valid for the lifetime
+        // of the struct.
+        unsafe {
+            core::array::from_fn(|ch_i| {
+                core::slice::from_raw_parts(*self.offsets.get_unchecked(ch_i), self.frames)
+            })
+        }
     }
 
     /// Get all channels as mutable slices. Each slice will have a length of `self.frames()`.
@@ -148,9 +178,17 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS
     pub fn as_mut_slices(&mut self) -> [&mut [T]; CHANNELS] {
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // so this is always within range.
-        unsafe { as_mut_slices(&mut self.data, self.frames, 0, self.frames) }
+        // * The constructors ensure that the pointed-to data vec has a length of at
+        // least `frames * CHANNELS`.
+        // * The Vec is pinned and cannot be moved, so the pointers are valid for the lifetime
+        // of the struct.
+        // * `self` is borrowed as mutable, and none of these slices overlap, so all
+        // mutability rules are being upheld.
+        unsafe {
+            core::array::from_fn(|ch_i| {
+                core::slice::from_raw_parts_mut(*self.offsets.get_unchecked(ch_i), self.frames)
+            })
+        }
     }
 
     /// Get all channels as immutable slices with the given length in frames.
@@ -163,9 +201,16 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS
 
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // and we have constrained `frames` above, so this is always within range.
-        unsafe { as_slices(&self.data, self.frames, 0, frames) }
+        // * The constructors ensure that the pointed-to data vec has a length of at
+        // least `frames * CHANNELS`.
+        // * The Vec is pinned and cannot be moved, so the pointers are valid for the lifetime
+        // of the struct.
+        // * We have constrained `frames` above.
+        unsafe {
+            core::array::from_fn(|ch_i| {
+                core::slice::from_raw_parts(*self.offsets.get_unchecked(ch_i), frames)
+            })
+        }
     }
 
     /// Get all channels as mutable slices with the given length in frames.
@@ -178,9 +223,18 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS
 
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // and we have constrained `frames` above, so this is always within range.
-        unsafe { as_mut_slices(&mut self.data, self.frames, 0, frames) }
+        // * The constructors ensure that the pointed-to data vec has a length of at
+        // least `frames * CHANNELS`.
+        // * The Vec is pinned and cannot be moved, so the pointers are valid for the lifetime
+        // of the struct.
+        // * We have constrained `frames` above.
+        // * `self` is borrowed as mutable, and none of these slices overlap, so all
+        // mutability rules are being upheld.
+        unsafe {
+            core::array::from_fn(|ch_i| {
+                core::slice::from_raw_parts_mut(*self.offsets.get_unchecked(ch_i), frames)
+            })
+        }
     }
 
     /// Get all channels as immutable slices in the given range.
@@ -194,10 +248,19 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS
 
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // and we have constrained `start_frame` and `frames` above, so this is always
-        // within range.
-        unsafe { as_slices(&self.data, self.frames, start_frame, frames) }
+        // * The constructors ensure that the pointed-to data vec has a length of at
+        // least `frames * CHANNELS`.
+        // * The Vec is pinned and cannot be moved, so the pointers are valid for the lifetime
+        // of the struct.
+        // * We have constrained the given range above.
+        unsafe {
+            core::array::from_fn(|ch_i| {
+                core::slice::from_raw_parts(
+                    self.offsets.get_unchecked(ch_i).add(start_frame),
+                    frames,
+                )
+            })
+        }
     }
 
     /// Get all channels as mutable slices in the given range.
@@ -211,10 +274,21 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS
 
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // and we have constrained `start_frame` and `frames` above, so this is always
-        // within range.
-        unsafe { as_mut_slices(&mut self.data, self.frames, start_frame, frames) }
+        // * The constructors ensure that the pointed-to data vec has a length of at
+        // least `frames * CHANNELS`.
+        // * The Vec is pinned and cannot be moved, so the pointers are valid for the lifetime
+        // of the struct.
+        // * We have constrained the given range above.
+        // * `self` is borrowed as mutable, and none of these slices overlap, so all
+        // mutability rules are being upheld.
+        unsafe {
+            core::array::from_fn(|ch_i| {
+                core::slice::from_raw_parts_mut(
+                    self.offsets.get_unchecked(ch_i).add(start_frame),
+                    frames,
+                )
+            })
+        }
     }
 
     /// Get the entire contents of the buffer as a single immutable slice.
@@ -239,22 +313,30 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> ChannelBuffer<T, CHANNELS
         }
     }
 
+    #[inline(always)]
     pub fn as_ref<'a>(&'a self) -> ChannelBufferRef<'a, T, CHANNELS> {
-        ChannelBufferRef {
-            data: &self.data,
-            frames: self.frames,
+        // SAFETY:
+        // * The constructors have the same invariants as `ChannelBufferRef`.
+        // * `[*const T; CHANNELS]` and `[*mut T; CHANNELS]` are interchangeable bit-for-bit.
+        unsafe {
+            ChannelBufferRef::from_raw(
+                &self.data,
+                core::mem::transmute_copy(&self.offsets),
+                self.frames,
+            )
         }
     }
 
+    #[inline(always)]
     pub fn as_mut<'a>(&'a mut self) -> ChannelBufferRefMut<'a, T, CHANNELS> {
-        ChannelBufferRefMut {
-            data: &mut self.data,
-            frames: self.frames,
-        }
+        // SAFETY: The constructors have the same invariants as `ChannelBufferRefMut`.
+        unsafe { ChannelBufferRefMut::from_raw(&mut self.data, self.offsets, self.frames) }
     }
 }
 
-impl<T: Clone + Copy + Default, const CHANNELS: usize> Index<usize> for ChannelBuffer<T, CHANNELS> {
+impl<T: Clone + Copy + Default + Unpin, const CHANNELS: usize> Index<usize>
+    for ChannelBuffer<T, CHANNELS>
+{
     type Output = [T];
 
     #[inline(always)]
@@ -263,7 +345,7 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> Index<usize> for ChannelB
     }
 }
 
-impl<T: Clone + Copy + Default, const CHANNELS: usize> IndexMut<usize>
+impl<T: Clone + Copy + Default + Unpin, const CHANNELS: usize> IndexMut<usize>
     for ChannelBuffer<T, CHANNELS>
 {
     #[inline(always)]
@@ -272,30 +354,62 @@ impl<T: Clone + Copy + Default, const CHANNELS: usize> IndexMut<usize>
     }
 }
 
-impl<T: Clone + Copy + Default, const CHANNELS: usize> Default for ChannelBuffer<T, CHANNELS> {
+impl<T: Clone + Copy + Default + Unpin, const CHANNELS: usize> Default
+    for ChannelBuffer<T, CHANNELS>
+{
     fn default() -> Self {
         Self::empty()
     }
 }
 
-impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Into<ChannelBufferRef<'a, T, CHANNELS>>
-    for &'a ChannelBuffer<T, CHANNELS>
+impl<'a, T: Clone + Copy + Default + Unpin, const CHANNELS: usize>
+    Into<ChannelBufferRef<'a, T, CHANNELS>> for &'a ChannelBuffer<T, CHANNELS>
 {
+    #[inline(always)]
     fn into(self) -> ChannelBufferRef<'a, T, CHANNELS> {
         self.as_ref()
     }
 }
 
-impl<'a, T: Clone + Copy + Default, const CHANNELS: usize>
+impl<'a, T: Clone + Copy + Default + Unpin, const CHANNELS: usize>
     Into<ChannelBufferRefMut<'a, T, CHANNELS>> for &'a mut ChannelBuffer<T, CHANNELS>
 {
+    #[inline(always)]
     fn into(self) -> ChannelBufferRefMut<'a, T, CHANNELS> {
         self.as_mut()
     }
 }
 
-impl<T: Clone + Copy + Default, const CHANNELS: usize> Into<Vec<T>> for ChannelBuffer<T, CHANNELS> {
+impl<T: Clone + Copy + Default + Unpin, const CHANNELS: usize> Into<Vec<T>>
+    for ChannelBuffer<T, CHANNELS>
+{
     fn into(self) -> Vec<T> {
-        self.data
+        Pin::<Vec<T>>::into_inner(self.data)
     }
+}
+
+impl<T: Clone + Copy + Default + Unpin, const CHANNELS: usize> Clone
+    for ChannelBuffer<T, CHANNELS>
+{
+    fn clone(&self) -> Self {
+        // SAFETY: We initialize all the data below.
+        let mut new_self = unsafe { Self::new_uninit(self.frames) };
+
+        new_self.raw_mut().copy_from_slice(self.raw());
+
+        new_self
+    }
+}
+
+// # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
+// the public API prevents misuse of the pointers.
+unsafe impl<T: Clone + Copy + Default + Unpin, const CHANNELS: usize> Send
+    for ChannelBuffer<T, CHANNELS>
+{
+}
+// # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
+// the public API prevents misuse of the pointers.
+unsafe impl<T: Clone + Copy + Default + Unpin, const CHANNELS: usize> Sync
+    for ChannelBuffer<T, CHANNELS>
+{
 }

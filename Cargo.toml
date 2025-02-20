@@ -1,6 +1,6 @@
 [package]
 name = "audio-channel-buffer"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Billy Messenger <60663878+BillyDM@users.noreply.github.com>"]
 license = "MIT"
@@ -28,7 +28,7 @@ alloc = []
 variable-channels = ["dep:arrayvec"]
 # Enable the buffer type that can store multiple instances of channel
 # buffers.
-instance-buffer = ["alloc", "variable-channels"]
+instance-buffer = ["alloc"]
 
 [dependencies]
 arrayvec = { version = "0.7", default-features = false, optional = true }

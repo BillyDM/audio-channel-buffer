@@ -6,21 +6,40 @@ use arrayvec::ArrayVec;
 /// An immutable memory-efficient buffer of samples with a fixed runtime number of
 /// channels each with a fixed runtime number of frames (samples in a single channel
 /// of audio).
-#[derive(Debug, Clone, Copy)]
+///
+/// This version uses a reference to a slice as its data source.
+#[derive(Debug, Clone)]
 pub struct VarChannelBufferRef<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize> {
-    pub(crate) data: &'a [T],
-    pub(crate) channels: NonZeroUsize,
-    pub(crate) frames: usize,
+    data: &'a [T],
+    offsets: ArrayVec<*const T, MAX_CHANNELS>,
+    frames: usize,
 }
 
 impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     VarChannelBufferRef<'a, T, MAX_CHANNELS>
 {
-    /// Create an empty [`VarChannelBufferRef`] with no data.
-    pub const fn empty() -> Self {
+    #[inline(always)]
+    pub(crate) unsafe fn from_raw(
+        data: &'a [T],
+        offsets: ArrayVec<*const T, MAX_CHANNELS>,
+        frames: usize,
+    ) -> Self {
         Self {
-            data: &[],
-            channels: NonZeroUsize::MIN,
+            data,
+            offsets,
+            frames,
+        }
+    }
+
+    /// Create an empty [`VarChannelBufferRef`] with no data.
+    pub fn empty() -> Self {
+        let data = &[];
+        let mut offsets = ArrayVec::new();
+        offsets.push(data.as_ptr());
+
+        Self {
+            data,
+            offsets,
             frames: 0,
         }
     }
@@ -34,9 +53,19 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
 
         let frames = data.len() / channels.get();
 
+        let mut offsets = ArrayVec::new();
+        // SAFETY:
+        // * All of these pointers point to valid memory in the slice.
+        // * We have constrained `channels` above.
+        unsafe {
+            for ch_i in 0..channels.get() {
+                offsets.push_unchecked(data.as_ptr().add(ch_i * frames));
+            }
+        }
+
         Self {
             data,
-            channels,
+            offsets,
             frames,
         }
     }
@@ -48,16 +77,22 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     /// * `data.len() >= frames * channels.get()`
     /// * and `channels.get() <= MAX_CHANNELS`
     pub unsafe fn new_unchecked(data: &'a [T], frames: usize, channels: NonZeroUsize) -> Self {
+        let mut offsets = ArrayVec::new();
+        for ch_i in 0..channels.get() {
+            offsets.push_unchecked(data.as_ptr().add(ch_i * frames));
+        }
+
         Self {
             data,
-            channels,
+            offsets,
             frames,
         }
     }
 
     /// The number of channels in this buffer.
     pub fn channels(&self) -> NonZeroUsize {
-        self.channels
+        // SAFETY: The constructors ensure that there is at least one element in `offsets`.
+        unsafe { NonZeroUsize::new_unchecked(self.offsets.len()) }
     }
 
     /// The number of frames (samples in a single channel of audio) that are allocated
@@ -72,7 +107,7 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     ///
     /// Returns `None` if `index` is out of bounds.
     pub fn channel(&self, index: usize) -> Option<&[T]> {
-        if index < MAX_CHANNELS {
+        if index < self.offsets.len() {
             // SAFETY:
             // We haved checked that `index` is within bounds.
             unsafe { Some(self.channel_unchecked(index)) }
@@ -90,21 +125,32 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     pub unsafe fn channel_unchecked(&self, index: usize) -> &[T] {
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // so this is always within range.
-        unsafe {
-            channel_unchecked::<T, MAX_CHANNELS>(self.data, self.frames, index, 0, self.frames)
-        }
+        // * The constructors ensure that the pointed-to data slice has a length of at
+        // least `frames * CHANNELS`.
+        // * The caller upholds that `index` is within bounds.
+        // * The data slice cannot be moved, so the pointers are valid for the lifetime
+        // of the slice.
+        core::slice::from_raw_parts(*self.offsets.get_unchecked(index), self.frames)
     }
 
     /// Get all channels as immutable slices. Each slice will have a length of `self.frames()`.
     #[inline]
     pub fn as_slices(&self) -> ArrayVec<&[T], MAX_CHANNELS> {
+        let mut v = ArrayVec::new();
+
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // so this is always within range.
-        unsafe { as_slices(self.data, self.channels.get(), self.frames, 0, self.frames) }
+        // * The constructors ensure that the pointed-to data slice has a length of at
+        // least `frames * CHANNELS`.
+        // * The data slice cannot be moved, so the pointers are valid for the lifetime
+        // of the slice.
+        unsafe {
+            for ptr in self.offsets.iter() {
+                v.push_unchecked(core::slice::from_raw_parts(*ptr, self.frames));
+            }
+        }
+
+        v
     }
 
     /// Get all channels as immutable slices with the given length in frames.
@@ -115,11 +161,22 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     pub fn as_slices_with_length(&self, frames: usize) -> ArrayVec<&[T], MAX_CHANNELS> {
         let frames = frames.min(self.frames);
 
+        let mut v = ArrayVec::new();
+
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // and we have constrained `frames` above, so this is always within range.
-        unsafe { as_slices(self.data, self.channels.get(), self.frames, 0, frames) }
+        // * The constructors ensure that the pointed-to data slice has a length of at
+        // least `frames * CHANNELS`.
+        // * The data slice cannot be moved, so the pointers are valid for the lifetime
+        // of the slice.
+        // * We have constrained `frames` above.
+        unsafe {
+            for ptr in self.offsets.iter() {
+                v.push_unchecked(core::slice::from_raw_parts(*ptr, frames));
+            }
+        }
+
+        v
     }
 
     /// Get all channels as immutable slices in the given range.
@@ -131,20 +188,22 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         let start_frame = range.start.min(self.frames);
         let frames = range.end.min(self.frames) - start_frame;
 
+        let mut v = ArrayVec::new();
+
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // and we have constrained `start_frame` and `frames` above, so this is always
-        // within range.
+        // * The constructors ensure that the pointed-to data slice has a length of at
+        // least `frames * CHANNELS`.
+        // * The data slice cannot be moved, so the pointers are valid for the lifetime
+        // of the slice.
+        // * We have constrained the given range above.
         unsafe {
-            as_slices(
-                self.data,
-                self.channels.get(),
-                self.frames,
-                start_frame,
-                frames,
-            )
+            for ptr in self.offsets.iter() {
+                v.push_unchecked(core::slice::from_raw_parts(ptr.add(start_frame), frames));
+            }
         }
+
+        v
     }
 
     /// Get the entire contents of the buffer as a single immutable slice.
@@ -180,24 +239,56 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize> Into<&'a [T]>
     }
 }
 
+// # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
+// the public API prevents misuse of the pointers.
+unsafe impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Send
+    for VarChannelBufferRef<'a, T, CHANNELS>
+{
+}
+// # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
+// the public API prevents misuse of the pointers.
+unsafe impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Sync
+    for VarChannelBufferRef<'a, T, CHANNELS>
+{
+}
+
 /// A mutable memory-efficient buffer of samples with a fixed runtime number of
 /// channels each with a fixed runtime number of frames (samples in a single channel
 /// of audio).
+///
+/// This version uses a reference to a slice as its data source.
 #[derive(Debug)]
 pub struct VarChannelBufferRefMut<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize> {
-    pub(crate) data: &'a mut [T],
-    pub(crate) channels: NonZeroUsize,
-    pub(crate) frames: usize,
+    data: &'a mut [T],
+    offsets: ArrayVec<*mut T, MAX_CHANNELS>,
+    frames: usize,
 }
 
 impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     VarChannelBufferRefMut<'a, T, MAX_CHANNELS>
 {
-    /// Create an empty [`VarChannelBufferRefMut`] with no data.
-    pub const fn empty() -> Self {
+    #[inline(always)]
+    pub(crate) unsafe fn from_raw(
+        data: &'a mut [T],
+        offsets: ArrayVec<*mut T, MAX_CHANNELS>,
+        frames: usize,
+    ) -> Self {
         Self {
-            data: &mut [],
-            channels: NonZeroUsize::MIN,
+            data,
+            offsets,
+            frames,
+        }
+    }
+
+    /// Create an empty [`VarChannelBufferRefMut`] with no data.
+    pub fn empty() -> Self {
+        let data = &mut [];
+        let mut offsets = ArrayVec::new();
+        offsets.push(data.as_mut_ptr());
+
+        Self {
+            data,
+            offsets,
             frames: 0,
         }
     }
@@ -211,9 +302,19 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
 
         let frames = data.len() / channels.get();
 
+        let mut offsets = ArrayVec::new();
+        // SAFETY:
+        // * All of these pointers point to valid memory in the slice.
+        // * We have constrained `channels` above.
+        unsafe {
+            for ch_i in 0..channels.get() {
+                offsets.push_unchecked(data.as_mut_ptr().add(ch_i * frames));
+            }
+        }
+
         Self {
             data,
-            channels,
+            offsets,
             frames,
         }
     }
@@ -225,16 +326,22 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     /// * `data.len() >= frames * channels.get()`
     /// * and `channels.get() <= MAX_CHANNELS`
     pub unsafe fn new_unchecked(data: &'a mut [T], frames: usize, channels: NonZeroUsize) -> Self {
+        let mut offsets = ArrayVec::new();
+        for ch_i in 0..channels.get() {
+            offsets.push_unchecked(data.as_mut_ptr().add(ch_i * frames));
+        }
+
         Self {
             data,
-            channels,
+            offsets,
             frames,
         }
     }
 
     /// The number of channels in this buffer.
     pub fn channels(&self) -> NonZeroUsize {
-        self.channels
+        // SAFETY: The constructors ensure that there is at least one element in `offsets`.
+        unsafe { NonZeroUsize::new_unchecked(self.offsets.len()) }
     }
 
     /// The number of frames (samples in a single channel of audio) that are allocated
@@ -249,25 +356,10 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     ///
     /// Returns `None` if `index` is out of bounds.
     pub fn channel(&self, index: usize) -> Option<&[T]> {
-        if index < MAX_CHANNELS {
+        if index < self.offsets.len() {
             // SAFETY:
             // We haved checked that `index` is within bounds.
             unsafe { Some(self.channel_unchecked(index)) }
-        } else {
-            None
-        }
-    }
-
-    #[inline(always)]
-    /// Get a mutable reference to the channel at `index`. The slice will have a length
-    /// of `self.frames()`.
-    ///
-    /// Returns `None` if `index` is out of bounds.
-    pub fn channel_mut(&mut self, index: usize) -> Option<&mut [T]> {
-        if index < MAX_CHANNELS {
-            // SAFETY:
-            // We haved checked that `index` is within bounds.
-            unsafe { Some(self.channel_unchecked_mut(index)) }
         } else {
             None
         }
@@ -282,10 +374,26 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     pub unsafe fn channel_unchecked(&self, index: usize) -> &[T] {
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // so this is always within range.
-        unsafe {
-            channel_unchecked::<T, MAX_CHANNELS>(self.data, self.frames, index, 0, self.frames)
+        // * The constructors ensure that the pointed-to data slice has a length of at
+        // least `frames * CHANNELS`.
+        // * The caller upholds that `index` is within bounds.
+        // * The data slice cannot be moved, so the pointers are valid for the lifetime
+        // of the slice.
+        core::slice::from_raw_parts(*self.offsets.get_unchecked(index), self.frames)
+    }
+
+    #[inline(always)]
+    /// Get a mutable reference to the channel at `index`. The slice will have a length
+    /// of `self.frames()`.
+    ///
+    /// Returns `None` if `index` is out of bounds.
+    pub fn channel_mut(&mut self, index: usize) -> Option<&mut [T]> {
+        if index < self.offsets.len() {
+            // SAFETY:
+            // We haved checked that `index` is within bounds.
+            unsafe { Some(self.channel_unchecked_mut(index)) }
+        } else {
+            None
         }
     }
 
@@ -298,31 +406,56 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     pub unsafe fn channel_unchecked_mut(&mut self, index: usize) -> &mut [T] {
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // so this is always within range.
-        unsafe {
-            channel_unchecked_mut::<T, MAX_CHANNELS>(self.data, self.frames, index, 0, self.frames)
-        }
+        // * The constructors ensure that the pointed-to data slice has a length of at
+        // least `frames * CHANNELS`.
+        // * The caller upholds that `index` is within bounds.
+        // * The data slice cannot be moved, so the pointers are valid for the lifetime
+        // of the slice.
+        // * `self` is borrowed as mutable, ensuring that no other references to the
+        // data slice can exist.
+        core::slice::from_raw_parts_mut(*self.offsets.get_unchecked(index), self.frames)
     }
 
     /// Get all channels as immutable slices. Each slice will have a length of `self.frames()`.
     #[inline]
     pub fn as_slices(&self) -> ArrayVec<&[T], MAX_CHANNELS> {
+        let mut v = ArrayVec::new();
+
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // so this is always within range.
-        unsafe { as_slices(self.data, self.channels.get(), self.frames, 0, self.frames) }
+        // * The constructors ensure that the pointed-to data slice has a length of at
+        // least `frames * CHANNELS`.
+        // * The data slice cannot be moved, so the pointers are valid for the lifetime
+        // of the slice.
+        unsafe {
+            for ptr in self.offsets.iter() {
+                v.push_unchecked(core::slice::from_raw_parts(*ptr, self.frames));
+            }
+        }
+
+        v
     }
 
     /// Get all channels as mutable slices. Each slice will have a length of `self.frames()`.
     #[inline]
     pub fn as_mut_slices(&mut self) -> ArrayVec<&mut [T], MAX_CHANNELS> {
+        let mut v = ArrayVec::new();
+
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // so this is always within range.
-        unsafe { as_mut_slices(self.data, self.channels.get(), self.frames, 0, self.frames) }
+        // * The constructors ensure that the pointed-to data slice has a length of at
+        // least `frames * CHANNELS`.
+        // * The data slice cannot be moved, so the pointers are valid for the lifetime
+        // of the slice.
+        // * `self` is borrowed as mutable, and none of these slices overlap, so all
+        // mutability rules are being upheld.
+        unsafe {
+            for ptr in self.offsets.iter() {
+                v.push_unchecked(core::slice::from_raw_parts_mut(*ptr, self.frames));
+            }
+        }
+
+        v
     }
 
     /// Get all channels as immutable slices with the given length in frames.
@@ -333,11 +466,22 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     pub fn as_slices_with_length(&self, frames: usize) -> ArrayVec<&[T], MAX_CHANNELS> {
         let frames = frames.min(self.frames);
 
+        let mut v = ArrayVec::new();
+
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // and we have constrained `frames` above, so this is always within range.
-        unsafe { as_slices(self.data, self.channels.get(), self.frames, 0, frames) }
+        // * The constructors ensure that the pointed-to data slice has a length of at
+        // least `frames * CHANNELS`.
+        // * The data slice cannot be moved, so the pointers are valid for the lifetime
+        // of the slice.
+        // * We have constrained `frames` above.
+        unsafe {
+            for ptr in self.offsets.iter() {
+                v.push_unchecked(core::slice::from_raw_parts(*ptr, frames));
+            }
+        }
+
+        v
     }
 
     /// Get all channels as mutable slices with the given length in frames.
@@ -348,11 +492,24 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     pub fn as_mut_slices_with_length(&mut self, frames: usize) -> ArrayVec<&mut [T], MAX_CHANNELS> {
         let frames = frames.min(self.frames);
 
+        let mut v = ArrayVec::new();
+
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // and we have constrained `frames` above, so this is always within range.
-        unsafe { as_mut_slices(self.data, self.channels.get(), self.frames, 0, frames) }
+        // * The constructors ensure that the pointed-to data slice has a length of at
+        // least `frames * CHANNELS`.
+        // * The data slice cannot be moved, so the pointers are valid for the lifetime
+        // of the slice.
+        // * We have constrained `frames` above.
+        // * `self` is borrowed as mutable, and none of these slices overlap, so all
+        // mutability rules are being upheld.
+        unsafe {
+            for ptr in self.offsets.iter() {
+                v.push_unchecked(core::slice::from_raw_parts_mut(*ptr, frames));
+            }
+        }
+
+        v
     }
 
     /// Get all channels as immutable slices in the given range.
@@ -364,23 +521,25 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         let start_frame = range.start.min(self.frames);
         let frames = range.end.min(self.frames) - start_frame;
 
+        let mut v = ArrayVec::new();
+
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // and we have constrained `start_frame` and `frames` above, so this is always
-        // within range.
+        // * The constructors ensure that the pointed-to data slice has a length of at
+        // least `frames * CHANNELS`.
+        // * The data slice cannot be moved, so the pointers are valid for the lifetime
+        // of the slice.
+        // * We have constrained the given range above.
         unsafe {
-            as_slices(
-                self.data,
-                self.channels.get(),
-                self.frames,
-                start_frame,
-                frames,
-            )
+            for ptr in self.offsets.iter() {
+                v.push_unchecked(core::slice::from_raw_parts(ptr.add(start_frame), frames));
+            }
         }
+
+        v
     }
 
-    /// Get all channels as mutable slices in the given range.
+    /// Get all channels as immutable slices in the given range.
     ///
     /// If all or part of the range falls out of bounds, then only the part that falls
     /// within range will be returned.
@@ -392,20 +551,27 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         let start_frame = range.start.min(self.frames);
         let frames = range.end.min(self.frames) - start_frame;
 
+        let mut v = ArrayVec::new();
+
         // SAFETY:
         //
-        // * The constructor has set the size of the buffer to`self.frames * self.channels`,
-        // and we have constrained `start_frame` and `frames` above, so this is always
-        // within range.
+        // * The constructors ensure that the pointed-to data slice has a length of at
+        // least `frames * CHANNELS`.
+        // * The data slice cannot be moved, so the pointers are valid for the lifetime
+        // of the slice.
+        // * We have constrained the given range above.
+        // * `self` is borrowed as mutable, and none of these slices overlap, so all
+        // mutability rules are being upheld.
         unsafe {
-            as_mut_slices(
-                self.data,
-                self.channels.get(),
-                self.frames,
-                start_frame,
-                frames,
-            )
+            for ptr in self.offsets.iter_mut() {
+                v.push_unchecked(core::slice::from_raw_parts_mut(
+                    ptr.add(start_frame),
+                    frames,
+                ));
+            }
         }
+
+        v
     }
 
     /// Get the entire contents of the buffer as a single immutable slice.
@@ -415,7 +581,7 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
 
     /// Get the entire contents of the buffer as a single mutable slice.
     pub fn raw_mut(&mut self) -> &mut [T] {
-        self.data
+        &mut self.data[..]
     }
 
     /// Clear all data with the default value.
@@ -462,10 +628,13 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize> Default
 impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     Into<VarChannelBufferRef<'a, T, MAX_CHANNELS>> for VarChannelBufferRefMut<'a, T, MAX_CHANNELS>
 {
+    #[inline(always)]
     fn into(self) -> VarChannelBufferRef<'a, T, MAX_CHANNELS> {
         VarChannelBufferRef {
             data: self.data,
-            channels: self.channels,
+            // SAFETY: `ArrayVec<*const T; MAX_CHANNELS>` and `ArrayVec<*mut T; MAX_CHANNELS>`
+            // are interchangeable bit-for-bit.
+            offsets: unsafe { core::mem::transmute_copy(&self.offsets) },
             frames: self.frames,
         }
     }
@@ -479,98 +648,15 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize> Into<&'a mut [T]>
     }
 }
 
-#[inline(always)]
-/// # Safety
-/// The caller must uphold that:
-/// * `data.len() >= frames * MAX_CHANNELS`
-/// * `slice_start_frame < frames`
-/// * and `slice_start_frame + slice_frames <= frames`
-pub unsafe fn channel_unchecked<T, const MAX_CHANNELS: usize>(
-    data: &[T],
-    frames: usize,
-    index: usize,
-    slice_start_frame: usize,
-    slice_frames: usize,
-) -> &[T] {
-    core::slice::from_raw_parts(
-        data.as_ptr().add((index * frames) + slice_start_frame),
-        slice_frames,
-    )
+// # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
+// the public API prevents misuse of the pointers.
+unsafe impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Send
+    for VarChannelBufferRefMut<'a, T, CHANNELS>
+{
 }
-
-#[inline(always)]
-/// # Safety
-/// The caller must uphold that:
-/// * `data.len() >= frames * MAX_CHANNELS`
-/// * `slice_start_frame < frames`
-/// * and `slice_start_frame + slice_frames <= frames`
-pub unsafe fn channel_unchecked_mut<T, const MAX_CHANNELS: usize>(
-    data: &mut [T],
-    frames: usize,
-    index: usize,
-    slice_start_frame: usize,
-    slice_frames: usize,
-) -> &mut [T] {
-    // SAFETY:
-    // `data` is borrowed mutably in this method, so all mutability rules
-    // are being upheld.
-    core::slice::from_raw_parts_mut(
-        data.as_mut_ptr().add((index * frames) + slice_start_frame),
-        slice_frames,
-    )
-}
-
-#[inline]
-/// # Safety
-/// The caller must uphold that:
-/// * `data.len() >= frames * MAX_CHANNELS`
-/// * `channels <= MAX_CHANNELS`
-/// * `slice_start_frame < frames`
-/// * and `slice_start_frame + slice_frames <= frames`
-pub(crate) unsafe fn as_slices<T, const MAX_CHANNELS: usize>(
-    data: &[T],
-    channels: usize,
-    frames: usize,
-    slice_start_frame: usize,
-    slice_frames: usize,
-) -> ArrayVec<&[T], MAX_CHANNELS> {
-    let mut v = ArrayVec::new();
-
-    for ch_i in 0..channels {
-        v.push_unchecked(core::slice::from_raw_parts(
-            data.as_ptr().add((ch_i * frames) + slice_start_frame),
-            slice_frames,
-        ));
-    }
-
-    v
-}
-
-#[inline]
-/// # Safety
-/// The caller must uphold that:
-/// * `data.len() >= frames * MAX_CHANNELS`
-/// * `channels <= MAX_CHANNELS`
-/// * `slice_start_frame < frames`
-/// * and `slice_start_frame + slice_frames <= frames`
-pub(crate) unsafe fn as_mut_slices<T, const MAX_CHANNELS: usize>(
-    data: &mut [T],
-    channels: usize,
-    frames: usize,
-    slice_start_frame: usize,
-    slice_frames: usize,
-) -> ArrayVec<&mut [T], MAX_CHANNELS> {
-    let mut v = ArrayVec::new();
-
-    // SAFETY:
-    // None of these slices overlap, and `data` is borrowed mutably in this method,
-    // so all mutability rules are being upheld.
-    for ch_i in 0..channels {
-        v.push_unchecked(core::slice::from_raw_parts_mut(
-            data.as_mut_ptr().add((ch_i * frames) + slice_start_frame),
-            slice_frames,
-        ));
-    }
-
-    v
+// # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
+// the public API prevents misuse of the pointers.
+unsafe impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Sync
+    for VarChannelBufferRefMut<'a, T, CHANNELS>
+{
 }

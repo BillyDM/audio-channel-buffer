@@ -1,83 +1,103 @@
-use core::num::NonZeroUsize;
+use core::pin::Pin;
 
-use crate::{VarChannelBufferRef, VarChannelBufferRefMut};
+use crate::{ChannelBufferRef, ChannelBufferRefMut};
 
-/// A memory-efficient buffer of samples with variable number of instances each with up to
-/// `MAX_CHANNELS` channels. Each channel has a fixed runtime number of `frames` (samples
-/// in a single channel of audio).
-#[derive(Debug, Clone)]
-pub struct InstanceChannelBuffer<T: Clone + Copy + Default, const MAX_CHANNELS: usize> {
-    data: Vec<T>,
-    num_instances: usize,
-    channels: NonZeroUsize,
+/// A memory-efficient buffer of samples with a fixed compile-time number of instances each with a
+/// fixed compile-time number of `CHANNELS`. Each channel has a fixed runtime number of `frames`
+/// (samples in a single channel of audio).
+#[derive(Debug)]
+pub struct InstanceChannelBuffer<
+    T: Clone + Copy + Default + Unpin,
+    const INSTANCES: usize,
+    const CHANNELS: usize,
+> {
+    data: Pin<Vec<T>>,
+    offsets: [[*mut T; CHANNELS]; INSTANCES],
     frames: usize,
     instance_length: usize,
 }
 
-impl<T: Clone + Copy + Default, const MAX_CHANNELS: usize> InstanceChannelBuffer<T, MAX_CHANNELS> {
+impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: usize>
+    InstanceChannelBuffer<T, INSTANCES, CHANNELS>
+{
     /// Create an empty [`InstanceBuffer`] with no allocated capacity.
-    pub const fn empty() -> Self {
+    pub fn empty() -> Self {
+        let mut data = Pin::new(Vec::<T>::new());
+
+        let offsets = core::array::from_fn(|_| core::array::from_fn(|_| data.as_mut_ptr()));
+
         Self {
-            data: Vec::new(),
-            num_instances: 0,
-            channels: NonZeroUsize::MIN,
+            data,
+            offsets,
             frames: 0,
             instance_length: 0,
         }
     }
 
     /// Create a new [`InstanceChannelBuffer`] allocated with the given number of
-    /// `instances`, each with the given number of `channels`, each with a length
-    /// of the given number of frames (samples in a single channel of audio).
+    /// `instances`, each with the given number of `frames` (samples in a single channel
+    /// of audio).
     ///
     /// All data will be initialized with the default value.
-    ///
-    /// # Panics
-    /// Panics if `channels.get() > MAX_CHANNELS`.
-    pub fn new(num_instances: usize, channels: NonZeroUsize, frames: usize) -> Self {
-        assert!(channels.get() <= MAX_CHANNELS);
-
-        let instance_length = frames * channels.get();
+    pub fn new(num_instances: usize, frames: usize) -> Self {
+        let instance_length = frames * CHANNELS;
         let buffer_len = instance_length * num_instances;
 
-        let mut data = Vec::new();
+        let mut data = Vec::<T>::new();
         data.reserve_exact(buffer_len);
         data.resize(buffer_len, Default::default());
 
+        let mut data = Pin::new(data);
+
+        // SAFETY: All of these pointers point to valid memory in the vec.
+        let offsets = unsafe {
+            core::array::from_fn(|inst_i| {
+                core::array::from_fn(|ch_i| {
+                    data.as_mut_ptr()
+                        .add((instance_length * inst_i) + (frames * ch_i))
+                })
+            })
+        };
+
         Self {
             data,
-            num_instances,
-            channels,
+            offsets,
             frames,
             instance_length,
         }
     }
 
     /// Create a new [`InstanceChannelBuffer`] allocated with the given number of
-    /// `instances`, each with the given number of `channels`, each with a length
-    /// of the given number of frames (samples in a single channel of audio).
+    /// `instances`, each with the given number of `frames` (samples in a single channel
+    /// of audio).
     ///
     /// No data will be initialized.
     ///
     /// # Safety
     /// Any data must be initialized before reading.
-    ///
-    /// # Panics
-    /// Panics if `channels.get() > MAX_CHANNELS`.
-    pub unsafe fn new_uninit(num_instances: usize, channels: NonZeroUsize, frames: usize) -> Self {
-        assert!(channels.get() <= MAX_CHANNELS);
-
-        let instance_length = frames * channels.get();
+    pub unsafe fn new_uninit(num_instances: usize, frames: usize) -> Self {
+        let instance_length = frames * CHANNELS;
         let buffer_len = instance_length * num_instances;
 
-        let mut data = Vec::new();
+        let mut data = Vec::<T>::new();
         data.reserve_exact(buffer_len);
         data.set_len(buffer_len);
 
+        let mut data = Pin::new(data);
+
+        // SAFETY: All of these pointers point to valid memory in the vec.
+        let offsets = unsafe {
+            core::array::from_fn(|inst_i| {
+                core::array::from_fn(|ch_i| {
+                    data.as_mut_ptr()
+                        .add((instance_length * inst_i) + (frames * ch_i))
+                })
+            })
+        };
+
         Self {
             data,
-            num_instances,
-            channels,
+            offsets,
             frames,
             instance_length,
         }
@@ -85,12 +105,12 @@ impl<T: Clone + Copy + Default, const MAX_CHANNELS: usize> InstanceChannelBuffer
 
     /// The number of instances in this buffer.
     pub fn num_instances(&self) -> usize {
-        self.num_instances
+        self.offsets.len()
     }
 
     /// The number of channels in this buffer.
-    pub fn channels(&self) -> NonZeroUsize {
-        self.channels
+    pub fn channels(&self) -> usize {
+        CHANNELS
     }
 
     /// The number of frames (samples in a single channel of audio) that are allocated
@@ -103,13 +123,10 @@ impl<T: Clone + Copy + Default, const MAX_CHANNELS: usize> InstanceChannelBuffer
     ///
     /// Returns `None` if `index` is out of bounds.
     #[inline(always)]
-    pub fn instance<'a>(
-        &'a self,
-        index: usize,
-    ) -> Option<VarChannelBufferRef<'a, T, MAX_CHANNELS>> {
-        if index < self.num_instances {
+    pub fn instance<'a>(&'a self, index: usize) -> Option<ChannelBufferRef<'a, T, CHANNELS>> {
+        if index < self.num_instances() {
             // # SAFETY:
-            // We have checked that `instance` is within bounds.
+            // We have checked that `index` is within bounds.
             unsafe { Some(self.instance_unchecked(index)) }
         } else {
             None
@@ -124,18 +141,23 @@ impl<T: Clone + Copy + Default, const MAX_CHANNELS: usize> InstanceChannelBuffer
     pub unsafe fn instance_unchecked<'a>(
         &'a self,
         index: usize,
-    ) -> VarChannelBufferRef<'a, T, MAX_CHANNELS> {
-        VarChannelBufferRef {
-            // # SAFETY:
-            // * The constructors, `set_num_instances`, and `set_num_instances_uninit` ensure
-            // that `self.data.len() == self.instance_length * self.num_instances`.
-            data: core::slice::from_raw_parts(
-                self.data.as_ptr().add(self.instance_length * index),
+    ) -> ChannelBufferRef<'a, T, CHANNELS> {
+        // SAFETY:
+        //
+        // * The constructors ensure that the pointed-to data vec has a length of at
+        // least `num_instances * frames * CHANNELS`.
+        // * The caller upholds that `index` is within bounds.
+        // * The Vec is pinned and cannot be moved, so the pointers are valid for the lifetime
+        // of the struct.
+        // * `[*const T; CHANNELS]` and `[*mut T; CHANNELS]` are interchangeable bit-for-bit.
+        ChannelBufferRef::from_raw(
+            core::slice::from_raw_parts(
+                *self.offsets.get_unchecked(index).get_unchecked(0),
                 self.instance_length,
             ),
-            channels: self.channels,
-            frames: self.frames,
-        }
+            core::mem::transmute_copy(self.offsets.get_unchecked(index)),
+            self.frames,
+        )
     }
 
     /// Get a mutable reference to the instance at the given index.
@@ -145,10 +167,10 @@ impl<T: Clone + Copy + Default, const MAX_CHANNELS: usize> InstanceChannelBuffer
     pub fn instance_mut<'a>(
         &'a mut self,
         index: usize,
-    ) -> Option<VarChannelBufferRefMut<'a, T, MAX_CHANNELS>> {
-        if index < self.num_instances {
+    ) -> Option<ChannelBufferRefMut<'a, T, CHANNELS>> {
+        if index < self.num_instances() {
             // # SAFETY:
-            // We have checked that `instance` is within bounds.
+            // We have checked that `index` is within bounds.
             unsafe { Some(self.instance_unchecked_mut(index)) }
         } else {
             None
@@ -163,57 +185,56 @@ impl<T: Clone + Copy + Default, const MAX_CHANNELS: usize> InstanceChannelBuffer
     pub unsafe fn instance_unchecked_mut<'a>(
         &'a mut self,
         index: usize,
-    ) -> VarChannelBufferRefMut<'a, T, MAX_CHANNELS> {
-        VarChannelBufferRefMut {
-            // # SAFETY:
-            // * The constructors, `set_num_instances`, and `set_num_instances_uninit` ensure
-            // that `self.data.len() == self.instance_length * self.num_instances`.
-            // * `self` is borrowed as mutable, ensuring that all mutability rules are being
-            // upheld.
-            data: core::slice::from_raw_parts_mut(
-                self.data.as_mut_ptr().add(self.instance_length * index),
+    ) -> ChannelBufferRefMut<'a, T, CHANNELS> {
+        // SAFETY:
+        //
+        // * The constructors ensure that the pointed-to data vec has a length of at
+        // least `num_instances * frames * CHANNELS`.
+        // * The caller upholds that `index` is within bounds.
+        // * The Vec is pinned and cannot be moved, so the pointers are valid for the lifetime
+        // of the struct.
+        // * `self` is borrowed as mutable, ensuring that no other references to the
+        // data Vec can exist.
+        ChannelBufferRefMut::from_raw(
+            core::slice::from_raw_parts_mut(
+                *self.offsets.get_unchecked(index).get_unchecked(0),
                 self.instance_length,
             ),
-            channels: self.channels,
-            frames: self.frames,
-        }
+            self.offsets.get_unchecked(index).clone(),
+            self.frames,
+        )
     }
 
-    /// Set the number of instances.
-    ///
-    /// This method may allocate and is not realtime-safe.
-    pub fn set_num_instances(&mut self, num_instances: usize) {
-        if self.num_instances == num_instances {
-            return;
-        }
-
-        let buffer_len = self.instance_length * num_instances;
-
-        self.data.resize(buffer_len, T::default());
-
-        self.num_instances = num_instances;
+    /// Get an immutable reference to all instances.
+    pub fn all_instances<'a>(&'a self) -> [ChannelBufferRef<'a, T, CHANNELS>; INSTANCES] {
+        // SAFETY: `inst_i` is always within bounds.
+        unsafe { std::array::from_fn(|inst_i| self.instance_unchecked(inst_i)) }
     }
 
-    /// Set the number of instances without initialize any new data.
-    ///
-    /// This method may allocate and is not realtime-safe.
-    ///
-    /// # Safety
-    /// Any data must be initialized before reading.
-    pub unsafe fn set_num_instances_uninit(&mut self, num_instances: usize) {
-        if self.num_instances == num_instances {
-            return;
+    /// Get a mutable reference to all instances.
+    pub fn all_instances_mut<'a>(
+        &'a mut self,
+    ) -> [ChannelBufferRefMut<'a, T, CHANNELS>; INSTANCES] {
+        // SAFETY:
+        // * The constructors ensure that the pointed-to data vec has a length of at
+        // least `num_instances * frames * CHANNELS`.
+        // * `inst_i` is always within bounds.
+        // * The Vec is pinned and cannot be moved, so the pointers are valid for the lifetime
+        // of the struct.
+        // * `self` is borrowed as mutable, and none of these slices overlap, so all
+        // mutability rules are being upheld.
+        unsafe {
+            std::array::from_fn(|inst_i| {
+                ChannelBufferRefMut::from_raw(
+                    core::slice::from_raw_parts_mut(
+                        *self.offsets.get_unchecked(inst_i).get_unchecked(0),
+                        self.instance_length,
+                    ),
+                    self.offsets.get_unchecked(inst_i).clone(),
+                    self.frames,
+                )
+            })
         }
-
-        let buffer_len = self.instance_length * num_instances;
-
-        if self.data.len() < buffer_len {
-            self.data.reserve(buffer_len - self.data.len());
-        }
-
-        self.data.set_len(buffer_len);
-
-        self.num_instances = num_instances;
     }
 
     /// Get the entire contents of the buffer as a single immutable slice.
@@ -230,94 +251,46 @@ impl<T: Clone + Copy + Default, const MAX_CHANNELS: usize> InstanceChannelBuffer
     pub fn clear(&mut self) {
         self.raw_mut().fill(T::default());
     }
-
-    /// Get an immutable iterator over all the instances.
-    pub fn iter<'a>(&'a self) -> InstanceChannelIter<'a, T, MAX_CHANNELS> {
-        InstanceChannelIter { buf: self, curr: 0 }
-    }
-
-    /// Get a mutable iterator over all the instances.
-    pub fn iter_mut<'a>(&'a mut self) -> InstanceChannelIterMut<'a, T, MAX_CHANNELS> {
-        InstanceChannelIterMut { buf: self, curr: 0 }
-    }
 }
 
-impl<T: Clone + Copy + Default, const MAX_CHANNELS: usize> Default
-    for InstanceChannelBuffer<T, MAX_CHANNELS>
+impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: usize> Default
+    for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
     fn default() -> Self {
         Self::empty()
     }
 }
 
-impl<T: Clone + Copy + Default, const MAX_CHANNELS: usize> Into<Vec<T>>
-    for InstanceChannelBuffer<T, MAX_CHANNELS>
+impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: usize> Into<Vec<T>>
+    for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
     fn into(self) -> Vec<T> {
-        self.data
+        Pin::<Vec<T>>::into_inner(self.data)
     }
 }
 
-pub struct InstanceChannelIter<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize> {
-    buf: &'a InstanceChannelBuffer<T, MAX_CHANNELS>,
-    curr: usize,
-}
-
-impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize> Iterator
-    for InstanceChannelIter<'a, T, MAX_CHANNELS>
+impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: usize> Clone
+    for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
-    type Item = VarChannelBufferRef<'a, T, MAX_CHANNELS>;
+    fn clone(&self) -> Self {
+        // SAFETY: We initialize all the data below.
+        let mut new_self = unsafe { Self::new_uninit(self.num_instances(), self.frames) };
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.curr;
-        self.curr += 1;
+        new_self.raw_mut().copy_from_slice(self.raw());
 
-        if current < self.buf.num_instances {
-            // # SAFETY:
-            // We have checked that `current` is within bounds.
-            unsafe { Some(self.buf.instance_unchecked(current)) }
-        } else {
-            None
-        }
+        new_self
     }
 }
 
-pub struct InstanceChannelIterMut<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize> {
-    buf: &'a mut InstanceChannelBuffer<T, MAX_CHANNELS>,
-    curr: usize,
-}
-
-impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize> Iterator
-    for InstanceChannelIterMut<'a, T, MAX_CHANNELS>
+// # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
+// the public API prevents misuse of the pointers.
+unsafe impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: usize> Send
+    for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
-    type Item = VarChannelBufferRefMut<'a, T, MAX_CHANNELS>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.curr;
-        self.curr += 1;
-
-        if current < self.buf.num_instances {
-            // # SAFETY:
-            // * We have checked that `current` is within bounds.
-            // * The constructors, `set_num_instances`, and `set_num_instances_uninit` ensure
-            // that `self.data.len() == self.instance_length * self.num_instances`.
-            // * The buffer is borrowed as mutable, and these slices do not overlap, so
-            // iterating over them will not break mutability rules.
-            unsafe {
-                Some(VarChannelBufferRefMut {
-                    data: core::slice::from_raw_parts_mut(
-                        self.buf
-                            .data
-                            .as_mut_ptr()
-                            .add(self.buf.instance_length * current),
-                        self.buf.instance_length,
-                    ),
-                    channels: self.buf.channels,
-                    frames: self.buf.frames,
-                })
-            }
-        } else {
-            None
-        }
-    }
+}
+// # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
+// the public API prevents misuse of the pointers.
+unsafe impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: usize> Sync
+    for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
+{
 }
