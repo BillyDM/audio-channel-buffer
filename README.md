@@ -1,8 +1,7 @@
 # Audio Channel Buffer
-![Test](https://github.com/BillyDM/audio-channel-buffer/workflows/Test/badge.svg)
-[![Documentation](https://docs.rs/audio-channel-buffer/badge.svg)][documentation]
+[![Documentation](https://docs.rs/audio-channel-buffer/badge.svg)](https://docs.rs/audio-channel-buffer)
 [![Crates.io](https://img.shields.io/crates/v/audio-channel-buffer.svg)](https://crates.io/crates/audio-channel-buffer)
-[![License](https://img.shields.io/crates/l/audio-channel-buffer.svg)](https://github.com/BillyDM/audio-channel-buffer/blob/master/LICENSE)
+[![License](https://img.shields.io/crates/l/audio-channel-buffer.svg)](https://github.com/BillyDM/audio-channel-buffer/blob/main/LICENSE)
 
 A collection of memory-efficient audio buffer types for realtime applications. These may have better cache efficiency and take up less memory than `Vec<Vec<T>>`.
 
