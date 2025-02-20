@@ -22,4 +22,6 @@ mod var_buffer;
 pub use var_buffer::VarChannelBuffer;
 
 #[cfg(feature = "instance-buffer")]
-pub mod instance_buffer;
+mod instance_buffer;
+#[cfg(feature = "instance-buffer")]
+pub use instance_buffer::InstanceChannelBuffer;
