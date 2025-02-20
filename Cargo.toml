@@ -1,0 +1,34 @@
+[package]
+name = "audio-channel-buffer"
+version = "0.1.0"
+edition = "2021"
+authors = ["Billy Messenger <60663878+BillyDM@users.noreply.github.com>"]
+license = "MIT"
+keywords = ["audio", "buffer", "dsp", "realtime"]
+categories = ["data-structures", "multimedia::audio", "no-std", "no-std::no-alloc"]
+description = "A collection of memory-efficient audio buffer types for realtime applications"
+repository = "https://github.com/BillyDM/audio-channel-buffer"
+documentation = "https://docs.rs/audio-channel-buffer"
+readme = "README.md"
+
+[badges]
+maintenance = { status = "passively-maintained" }
+
+[package.metadata."docs.rs"]
+all-features = true
+
+[features]
+default = ["std", "alloc"]
+# Enable use of the standard library
+std = ["arrayvec?/std"]
+# Enable the buffer types which require an allocator
+alloc = []
+# Enable the buffer types that can have a variable number of channels
+# set at runtime
+variable-channels = ["dep:arrayvec"]
+# Enable the buffer type that can store multiple instances of channel
+# buffers.
+instance-buffer = ["alloc", "variable-channels"]
+
+[dependencies]
+arrayvec = { version = "0.7", default-features = false, optional = true }
