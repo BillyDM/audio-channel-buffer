@@ -18,12 +18,18 @@ pub struct VarChannelBufferRef<'a, T: Clone + Copy + Default, const MAX_CHANNELS
 impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     VarChannelBufferRef<'a, T, MAX_CHANNELS>
 {
+    const _COMPILE_TIME_ASSERTS: () = {
+        assert!(MAX_CHANNELS > 0);
+    };
+
     #[inline(always)]
     pub(crate) unsafe fn from_raw(
         data: &'a [T],
         offsets: ArrayVec<*const T, MAX_CHANNELS>,
         frames: usize,
     ) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         Self {
             data,
             offsets,
@@ -33,6 +39,8 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
 
     /// Create an empty [`VarChannelBufferRef`] with no data.
     pub fn empty() -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         let data = &[];
         let mut offsets = ArrayVec::new();
         offsets.push(data.as_ptr());
@@ -49,6 +57,8 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     /// # Panics
     /// Panics if `channels.get() > MAX_CHANNELS`.
     pub fn new(data: &'a [T], channels: NonZeroUsize) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         assert!(channels.get() <= MAX_CHANNELS);
 
         let frames = data.len() / channels.get();
@@ -57,6 +67,7 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         // * All of these pointers point to valid memory in the slice.
         // * We have constrained `channels` above.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         unsafe {
             for ch_i in 0..channels.get() {
                 offsets.push_unchecked(data.as_ptr().add(ch_i * frames));
@@ -74,9 +85,11 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     ///
     /// # Safety
     /// The caller must uphold that:
-    /// * `data.len() >= frames * channels.get()`
+    /// * `data.len() >= frames * self.channels().get()`
     /// * and `channels.get() <= MAX_CHANNELS`
     pub unsafe fn new_unchecked(data: &'a [T], frames: usize, channels: NonZeroUsize) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         let mut offsets = ArrayVec::new();
         for ch_i in 0..channels.get() {
             offsets.push_unchecked(data.as_ptr().add(ch_i * frames));
@@ -126,10 +139,11 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         //
         // * The constructors ensure that the pointed-to data slice has a length of at
-        // least `frames * CHANNELS`.
+        // least `frames * self.channels()`.
         // * The caller upholds that `index` is within bounds.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         core::slice::from_raw_parts(*self.offsets.get_unchecked(index), self.frames)
     }
 
@@ -141,9 +155,10 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         //
         // * The constructors ensure that the pointed-to data slice has a length of at
-        // least `frames * CHANNELS`.
+        // least `frames * self.channels()`.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         unsafe {
             for ptr in self.offsets.iter() {
                 v.push_unchecked(core::slice::from_raw_parts(*ptr, self.frames));
@@ -166,10 +181,11 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         //
         // * The constructors ensure that the pointed-to data slice has a length of at
-        // least `frames * CHANNELS`.
+        // least `frames * self.channels()`.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
         // * We have constrained `frames` above.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         unsafe {
             for ptr in self.offsets.iter() {
                 v.push_unchecked(core::slice::from_raw_parts(*ptr, frames));
@@ -193,10 +209,11 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         //
         // * The constructors ensure that the pointed-to data slice has a length of at
-        // least `frames * CHANNELS`.
+        // least `frames * self.channels()`.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
         // * We have constrained the given range above.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         unsafe {
             for ptr in self.offsets.iter() {
                 v.push_unchecked(core::slice::from_raw_parts(ptr.add(start_frame), frames));
@@ -267,12 +284,18 @@ pub struct VarChannelBufferRefMut<'a, T: Clone + Copy + Default, const MAX_CHANN
 impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     VarChannelBufferRefMut<'a, T, MAX_CHANNELS>
 {
+    const _COMPILE_TIME_ASSERTS: () = {
+        assert!(MAX_CHANNELS > 0);
+    };
+
     #[inline(always)]
     pub(crate) unsafe fn from_raw(
         data: &'a mut [T],
         offsets: ArrayVec<*mut T, MAX_CHANNELS>,
         frames: usize,
     ) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         Self {
             data,
             offsets,
@@ -282,6 +305,8 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
 
     /// Create an empty [`VarChannelBufferRefMut`] with no data.
     pub fn empty() -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         let data = &mut [];
         let mut offsets = ArrayVec::new();
         offsets.push(data.as_mut_ptr());
@@ -298,6 +323,8 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     /// # Panics
     /// Panics if `channels.get() > MAX_CHANNELS`.
     pub fn new(data: &'a mut [T], channels: NonZeroUsize) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         assert!(channels.get() <= MAX_CHANNELS);
 
         let frames = data.len() / channels.get();
@@ -306,6 +333,7 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         // * All of these pointers point to valid memory in the slice.
         // * We have constrained `channels` above.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         unsafe {
             for ch_i in 0..channels.get() {
                 offsets.push_unchecked(data.as_mut_ptr().add(ch_i * frames));
@@ -323,9 +351,11 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
     ///
     /// # Safety
     /// The caller must uphold that:
-    /// * `data.len() >= frames * channels.get()`
+    /// * `data.len() >= frames * self.channels().get()`
     /// * and `channels.get() <= MAX_CHANNELS`
     pub unsafe fn new_unchecked(data: &'a mut [T], frames: usize, channels: NonZeroUsize) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         let mut offsets = ArrayVec::new();
         for ch_i in 0..channels.get() {
             offsets.push_unchecked(data.as_mut_ptr().add(ch_i * frames));
@@ -375,10 +405,11 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         //
         // * The constructors ensure that the pointed-to data slice has a length of at
-        // least `frames * CHANNELS`.
+        // least `frames * self.channels()`.
         // * The caller upholds that `index` is within bounds.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         core::slice::from_raw_parts(*self.offsets.get_unchecked(index), self.frames)
     }
 
@@ -407,12 +438,13 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         //
         // * The constructors ensure that the pointed-to data slice has a length of at
-        // least `frames * CHANNELS`.
+        // least `frames * self.channels()`.
         // * The caller upholds that `index` is within bounds.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
         // * `self` is borrowed as mutable, ensuring that no other references to the
         // data slice can exist.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         core::slice::from_raw_parts_mut(*self.offsets.get_unchecked(index), self.frames)
     }
 
@@ -424,9 +456,10 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         //
         // * The constructors ensure that the pointed-to data slice has a length of at
-        // least `frames * CHANNELS`.
+        // least `frames * self.channels()`.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         unsafe {
             for ptr in self.offsets.iter() {
                 v.push_unchecked(core::slice::from_raw_parts(*ptr, self.frames));
@@ -444,11 +477,12 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         //
         // * The constructors ensure that the pointed-to data slice has a length of at
-        // least `frames * CHANNELS`.
+        // least `frames * self.channels()`.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
         // * `self` is borrowed as mutable, and none of these slices overlap, so all
         // mutability rules are being upheld.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         unsafe {
             for ptr in self.offsets.iter() {
                 v.push_unchecked(core::slice::from_raw_parts_mut(*ptr, self.frames));
@@ -471,10 +505,11 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         //
         // * The constructors ensure that the pointed-to data slice has a length of at
-        // least `frames * CHANNELS`.
+        // least `frames * self.channels()`.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
         // * We have constrained `frames` above.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         unsafe {
             for ptr in self.offsets.iter() {
                 v.push_unchecked(core::slice::from_raw_parts(*ptr, frames));
@@ -497,12 +532,13 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         //
         // * The constructors ensure that the pointed-to data slice has a length of at
-        // least `frames * CHANNELS`.
+        // least `frames * self.channels()`.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
         // * We have constrained `frames` above.
         // * `self` is borrowed as mutable, and none of these slices overlap, so all
         // mutability rules are being upheld.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         unsafe {
             for ptr in self.offsets.iter() {
                 v.push_unchecked(core::slice::from_raw_parts_mut(*ptr, frames));
@@ -526,10 +562,11 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         //
         // * The constructors ensure that the pointed-to data slice has a length of at
-        // least `frames * CHANNELS`.
+        // least `frames * self.channels()`.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
         // * We have constrained the given range above.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         unsafe {
             for ptr in self.offsets.iter() {
                 v.push_unchecked(core::slice::from_raw_parts(ptr.add(start_frame), frames));
@@ -556,12 +593,13 @@ impl<'a, T: Clone + Copy + Default, const MAX_CHANNELS: usize>
         // SAFETY:
         //
         // * The constructors ensure that the pointed-to data slice has a length of at
-        // least `frames * CHANNELS`.
+        // least `frames * self.channels()`.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
         // * We have constrained the given range above.
         // * `self` is borrowed as mutable, and none of these slices overlap, so all
         // mutability rules are being upheld.
+        // * We have asserted at compile-time that `MAX_CHANNELS` is non-zero.
         unsafe {
             for ptr in self.offsets.iter_mut() {
                 v.push_unchecked(core::slice::from_raw_parts_mut(

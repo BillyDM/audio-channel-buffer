@@ -13,12 +13,18 @@ pub struct ChannelBufferRef<'a, T: Clone + Copy + Default, const CHANNELS: usize
 }
 
 impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRef<'a, T, CHANNELS> {
+    const _COMPILE_TIME_ASSERTS: () = {
+        assert!(CHANNELS > 0);
+    };
+
     #[inline(always)]
     pub(crate) unsafe fn from_raw(
         data: &'a [T],
         offsets: [*const T; CHANNELS],
         frames: usize,
     ) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         Self {
             data,
             offsets,
@@ -28,6 +34,8 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRef<'a, 
 
     /// Create an empty [`ChannelBufferRef`] with no data.
     pub fn empty() -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         let data = &[];
         let offsets = core::array::from_fn(|_| data.as_ptr());
 
@@ -40,11 +48,15 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRef<'a, 
 
     /// Create a new [`ChannelBufferRef`] using the given slice as the data.
     pub fn new(data: &'a [T]) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         let frames = data.len() / CHANNELS;
 
         Self {
             data,
-            // SAFETY: All of these pointers point to valid memory in the slice.
+            // SAFETY:
+            // * All of these pointers point to valid memory in the slice.
+            // * We have asserted at compile-time that `CHANNELS` is non-zero.
             offsets: unsafe { core::array::from_fn(|ch_i| data.as_ptr().add(ch_i * frames)) },
             frames,
         }
@@ -55,9 +67,13 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRef<'a, 
     /// # Safety
     /// The caller must uphold that `data.len() >= frames * CHANNELS`.
     pub unsafe fn new_unchecked(data: &'a [T], frames: usize) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         Self {
             data,
-            // SAFETY: All of these pointers point to valid memory in the slice.
+            // SAFETY:
+            // * All of these pointers point to valid memory in the slice.
+            // * We have asserted at compile-time that `CHANNELS` is non-zero.
             offsets: core::array::from_fn(|ch_i| data.as_ptr().add(ch_i * frames)),
             frames,
         }
@@ -102,6 +118,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRef<'a, 
         // * The caller upholds that `index` is within bounds.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         core::slice::from_raw_parts(*self.offsets.get_unchecked(index), self.frames)
     }
 
@@ -114,6 +131,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRef<'a, 
         // least `frames * CHANNELS`.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         unsafe {
             core::array::from_fn(|ch_i| {
                 core::slice::from_raw_parts(*self.offsets.get_unchecked(ch_i), self.frames)
@@ -136,6 +154,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRef<'a, 
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
         // * We have constrained `frames` above.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         unsafe {
             core::array::from_fn(|ch_i| {
                 core::slice::from_raw_parts(*self.offsets.get_unchecked(ch_i), frames)
@@ -159,6 +178,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRef<'a, 
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
         // * We have constrained the given range above.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         unsafe {
             core::array::from_fn(|ch_i| {
                 core::slice::from_raw_parts(
@@ -228,12 +248,18 @@ pub struct ChannelBufferRefMut<'a, T: Clone + Copy + Default, const CHANNELS: us
 }
 
 impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'a, T, CHANNELS> {
+    const _COMPILE_TIME_ASSERTS: () = {
+        assert!(CHANNELS > 0);
+    };
+
     #[inline(always)]
     pub(crate) unsafe fn from_raw(
         data: &'a mut [T],
         offsets: [*mut T; CHANNELS],
         frames: usize,
     ) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         Self {
             data,
             offsets,
@@ -243,6 +269,8 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'
 
     /// Create an empty [`ChannelBufferRefMut`] with no data.
     pub fn empty() -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         let data = &mut [];
         let offsets = core::array::from_fn(|_| data.as_mut_ptr());
 
@@ -255,9 +283,13 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'
 
     /// Create a new [`ChannelBufferRefMut`] using the given slice as the data.
     pub fn new(data: &'a mut [T]) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         let frames = data.len() / CHANNELS;
 
-        // SAFETY: All of these pointers point to valid memory in the slice.
+        // SAFETY:
+        // * All of these pointers point to valid memory in the slice.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         let offsets = unsafe { core::array::from_fn(|ch_i| data.as_mut_ptr().add(ch_i * frames)) };
 
         Self {
@@ -272,7 +304,11 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'
     /// # Safety
     /// The caller must uphold that `data.len() >= frames * CHANNELS`.
     pub unsafe fn new_unchecked(data: &'a mut [T], frames: usize) -> Self {
-        // SAFETY: All of these pointers point to valid memory in the slice.
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
+        // SAFETY:
+        // * All of these pointers point to valid memory in the slice.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         let offsets = core::array::from_fn(|ch_i| data.as_mut_ptr().add(ch_i * frames));
 
         Self {
@@ -321,6 +357,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'
         // * The caller upholds that `index` is within bounds.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         core::slice::from_raw_parts(*self.offsets.get_unchecked(index), self.frames)
     }
 
@@ -354,6 +391,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'
         // of the slice.
         // * `self` is borrowed as mutable, ensuring that no other references to the
         // data slice can exist.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         core::slice::from_raw_parts_mut(*self.offsets.get_unchecked(index), self.frames)
     }
 
@@ -366,6 +404,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'
         // least `frames * CHANNELS`.
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         unsafe {
             core::array::from_fn(|ch_i| {
                 core::slice::from_raw_parts(*self.offsets.get_unchecked(ch_i), self.frames)
@@ -384,6 +423,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'
         // of the slice.
         // * `self` is borrowed as mutable, and none of these slices overlap, so all
         // mutability rules are being upheld.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         unsafe {
             core::array::from_fn(|ch_i| {
                 core::slice::from_raw_parts_mut(*self.offsets.get_unchecked(ch_i), self.frames)
@@ -406,6 +446,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
         // * We have constrained `frames` above.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         unsafe {
             core::array::from_fn(|ch_i| {
                 core::slice::from_raw_parts(*self.offsets.get_unchecked(ch_i), frames)
@@ -430,6 +471,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'
         // * We have constrained `frames` above.
         // * `self` is borrowed as mutable, and none of these slices overlap, so all
         // mutability rules are being upheld.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         unsafe {
             core::array::from_fn(|ch_i| {
                 core::slice::from_raw_parts_mut(*self.offsets.get_unchecked(ch_i), frames)
@@ -453,6 +495,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'
         // * The data slice cannot be moved, so the pointers are valid for the lifetime
         // of the slice.
         // * We have constrained the given range above.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         unsafe {
             core::array::from_fn(|ch_i| {
                 core::slice::from_raw_parts(
@@ -481,6 +524,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'
         // * We have constrained the given range above.
         // * `self` is borrowed as mutable, and none of these slices overlap, so all
         // mutability rules are being upheld.
+        // * We have asserted at compile-time that `CHANNELS` is non-zero.
         unsafe {
             core::array::from_fn(|ch_i| {
                 core::slice::from_raw_parts_mut(

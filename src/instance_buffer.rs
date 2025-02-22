@@ -7,7 +7,7 @@ use crate::{ChannelBufferRef, ChannelBufferRefMut};
 /// (samples in a single channel of audio).
 #[derive(Debug)]
 pub struct InstanceChannelBuffer<
-    T: Clone + Copy + Default + Unpin,
+    T: Clone + Copy + Default + Unpin + Sized,
     const INSTANCES: usize,
     const CHANNELS: usize,
 > {
@@ -17,11 +17,18 @@ pub struct InstanceChannelBuffer<
     instance_length: usize,
 }
 
-impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: usize>
+impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CHANNELS: usize>
     InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
+    const _COMPILE_TIME_ASSERTS: () = {
+        assert!(INSTANCES > 0);
+        assert!(CHANNELS > 0);
+    };
+
     /// Create an empty [`InstanceBuffer`] with no allocated capacity.
     pub fn empty() -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         let mut data = Pin::new(Vec::<T>::new());
 
         let offsets = core::array::from_fn(|_| core::array::from_fn(|_| data.as_mut_ptr()));
@@ -40,6 +47,8 @@ impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: 
     ///
     /// All data will be initialized with the default value.
     pub fn new(num_instances: usize, frames: usize) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         let instance_length = frames * CHANNELS;
         let buffer_len = instance_length * num_instances;
 
@@ -76,6 +85,8 @@ impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: 
     /// # Safety
     /// Any data must be initialized before reading.
     pub unsafe fn new_uninit(num_instances: usize, frames: usize) -> Self {
+        let _ = Self::_COMPILE_TIME_ASSERTS;
+
         let instance_length = frames * CHANNELS;
         let buffer_len = instance_length * num_instances;
 
@@ -150,6 +161,7 @@ impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: 
         // * The Vec is pinned and cannot be moved, so the pointers are valid for the lifetime
         // of the struct.
         // * `[*const T; CHANNELS]` and `[*mut T; CHANNELS]` are interchangeable bit-for-bit.
+        // * We have asserted at compile-time that both `INSTANCES` and `CHANNELS` are non-zero.
         ChannelBufferRef::from_raw(
             core::slice::from_raw_parts(
                 *self.offsets.get_unchecked(index).get_unchecked(0),
@@ -195,6 +207,7 @@ impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: 
         // of the struct.
         // * `self` is borrowed as mutable, ensuring that no other references to the
         // data Vec can exist.
+        // * We have asserted at compile-time that both `INSTANCES` and `CHANNELS` are non-zero.
         ChannelBufferRefMut::from_raw(
             core::slice::from_raw_parts_mut(
                 *self.offsets.get_unchecked(index).get_unchecked(0),
@@ -223,6 +236,7 @@ impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: 
         // of the struct.
         // * `self` is borrowed as mutable, and none of these slices overlap, so all
         // mutability rules are being upheld.
+        // * We have asserted at compile-time that both `INSTANCES` and `CHANNELS` are non-zero.
         unsafe {
             std::array::from_fn(|inst_i| {
                 ChannelBufferRefMut::from_raw(
@@ -253,23 +267,23 @@ impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: 
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: usize> Default
-    for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
+impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CHANNELS: usize>
+    Default for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
     fn default() -> Self {
         Self::empty()
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: usize> Into<Vec<T>>
-    for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
+impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CHANNELS: usize>
+    Into<Vec<T>> for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
     fn into(self) -> Vec<T> {
         Pin::<Vec<T>>::into_inner(self.data)
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: usize> Clone
+impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CHANNELS: usize> Clone
     for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
     fn clone(&self) -> Self {
@@ -284,13 +298,13 @@ impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: 
 
 // # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
 // the public API prevents misuse of the pointers.
-unsafe impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: usize> Send
-    for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
+unsafe impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CHANNELS: usize>
+    Send for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
 }
 // # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
 // the public API prevents misuse of the pointers.
-unsafe impl<T: Clone + Copy + Default + Unpin, const INSTANCES: usize, const CHANNELS: usize> Sync
-    for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
+unsafe impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CHANNELS: usize>
+    Sync for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
 }
