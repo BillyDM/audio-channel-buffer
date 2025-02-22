@@ -7,7 +7,7 @@ use crate::{ChannelBufferRef, ChannelBufferRefMut};
 /// (samples in a single channel of audio).
 #[derive(Debug)]
 pub struct InstanceChannelBuffer<
-    T: Clone + Copy + Default + Unpin + Sized,
+    T: Clone + Copy + Default + Sized + Unpin,
     const INSTANCES: usize,
     const CHANNELS: usize,
 > {
@@ -17,7 +17,7 @@ pub struct InstanceChannelBuffer<
     instance_length: usize,
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CHANNELS: usize>
+impl<T: Clone + Copy + Default + Sized + Unpin, const INSTANCES: usize, const CHANNELS: usize>
     InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
     const _COMPILE_TIME_ASSERTS: () = {
@@ -267,7 +267,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CH
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CHANNELS: usize>
+impl<T: Clone + Copy + Default + Sized + Unpin, const INSTANCES: usize, const CHANNELS: usize>
     Default for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
     fn default() -> Self {
@@ -275,7 +275,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CH
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CHANNELS: usize>
+impl<T: Clone + Copy + Default + Sized + Unpin, const INSTANCES: usize, const CHANNELS: usize>
     Into<Vec<T>> for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
     fn into(self) -> Vec<T> {
@@ -283,7 +283,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CH
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CHANNELS: usize> Clone
+impl<T: Clone + Copy + Default + Sized + Unpin, const INSTANCES: usize, const CHANNELS: usize> Clone
     for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
     fn clone(&self) -> Self {
@@ -298,13 +298,13 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CH
 
 // # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
 // the public API prevents misuse of the pointers.
-unsafe impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CHANNELS: usize>
+unsafe impl<T: Clone + Copy + Default + Sized + Unpin, const INSTANCES: usize, const CHANNELS: usize>
     Send for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
 }
 // # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
 // the public API prevents misuse of the pointers.
-unsafe impl<T: Clone + Copy + Default + Unpin + Sized, const INSTANCES: usize, const CHANNELS: usize>
+unsafe impl<T: Clone + Copy + Default + Sized + Unpin, const INSTANCES: usize, const CHANNELS: usize>
     Sync for InstanceChannelBuffer<T, INSTANCES, CHANNELS>
 {
 }

@@ -12,13 +12,13 @@ use crate::{VarChannelBufferRef, VarChannelBufferRefMut};
 ///
 /// This version uses an owned `Vec` as its data source.
 #[derive(Debug)]
-pub struct VarChannelBuffer<T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize> {
+pub struct VarChannelBuffer<T: Clone + Copy + Default + Sized + Unpin, const MAX_CHANNELS: usize> {
     data: Pin<Vec<T>>,
     offsets: ArrayVec<*mut T, MAX_CHANNELS>,
     frames: usize,
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize>
+impl<T: Clone + Copy + Default + Sized + Unpin, const MAX_CHANNELS: usize>
     VarChannelBuffer<T, MAX_CHANNELS>
 {
     const _COMPILE_TIME_ASSERTS: () = {
@@ -410,7 +410,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize>
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize> Index<usize>
+impl<T: Clone + Copy + Default + Sized + Unpin, const MAX_CHANNELS: usize> Index<usize>
     for VarChannelBuffer<T, MAX_CHANNELS>
 {
     type Output = [T];
@@ -421,7 +421,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize> Index
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize> IndexMut<usize>
+impl<T: Clone + Copy + Default + Sized + Unpin, const MAX_CHANNELS: usize> IndexMut<usize>
     for VarChannelBuffer<T, MAX_CHANNELS>
 {
     #[inline(always)]
@@ -430,7 +430,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize> Index
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize> Default
+impl<T: Clone + Copy + Default + Sized + Unpin, const MAX_CHANNELS: usize> Default
     for VarChannelBuffer<T, MAX_CHANNELS>
 {
     fn default() -> Self {
@@ -438,7 +438,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize> Defau
     }
 }
 
-impl<'a, T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize>
+impl<'a, T: Clone + Copy + Default + Sized + Unpin, const MAX_CHANNELS: usize>
     Into<VarChannelBufferRef<'a, T, MAX_CHANNELS>> for &'a VarChannelBuffer<T, MAX_CHANNELS>
 {
     #[inline(always)]
@@ -447,7 +447,7 @@ impl<'a, T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize>
     }
 }
 
-impl<'a, T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize>
+impl<'a, T: Clone + Copy + Default + Sized + Unpin, const MAX_CHANNELS: usize>
     Into<VarChannelBufferRefMut<'a, T, MAX_CHANNELS>>
     for &'a mut VarChannelBuffer<T, MAX_CHANNELS>
 {
@@ -457,7 +457,7 @@ impl<'a, T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize>
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize> Into<Vec<T>>
+impl<T: Clone + Copy + Default + Sized + Unpin, const MAX_CHANNELS: usize> Into<Vec<T>>
     for VarChannelBuffer<T, MAX_CHANNELS>
 {
     fn into(self) -> Vec<T> {
@@ -465,7 +465,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const MAX_CHANNELS: usize> Into<
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Clone
+impl<T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize> Clone
     for VarChannelBuffer<T, CHANNELS>
 {
     fn clone(&self) -> Self {
@@ -480,13 +480,13 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Clone
 
 // # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
 // the public API prevents misuse of the pointers.
-unsafe impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Send
+unsafe impl<T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize> Send
     for VarChannelBuffer<T, CHANNELS>
 {
 }
 // # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
 // the public API prevents misuse of the pointers.
-unsafe impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Sync
+unsafe impl<T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize> Sync
     for VarChannelBuffer<T, CHANNELS>
 {
 }

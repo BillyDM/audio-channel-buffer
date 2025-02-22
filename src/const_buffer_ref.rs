@@ -6,13 +6,15 @@ use core::ops::{Index, IndexMut, Range};
 ///
 /// This version uses a reference to a slice as its data source.
 #[derive(Debug, Clone, Copy)]
-pub struct ChannelBufferRef<'a, T: Clone + Copy + Default, const CHANNELS: usize> {
+pub struct ChannelBufferRef<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> {
     data: &'a [T],
     offsets: [*const T; CHANNELS],
     frames: usize,
 }
 
-impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRef<'a, T, CHANNELS> {
+impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize>
+    ChannelBufferRef<'a, T, CHANNELS>
+{
     const _COMPILE_TIME_ASSERTS: () = {
         assert!(CHANNELS > 0);
     };
@@ -195,7 +197,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRef<'a, 
     }
 }
 
-impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Index<usize>
+impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> Index<usize>
     for ChannelBufferRef<'a, T, CHANNELS>
 {
     type Output = [T];
@@ -206,7 +208,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Index<usize>
     }
 }
 
-impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Default
+impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> Default
     for ChannelBufferRef<'a, T, CHANNELS>
 {
     fn default() -> Self {
@@ -214,7 +216,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Default
     }
 }
 
-impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Into<&'a [T]>
+impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> Into<&'a [T]>
     for ChannelBufferRefMut<'a, T, CHANNELS>
 {
     fn into(self) -> &'a [T] {
@@ -224,13 +226,13 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Into<&'a [T]>
 
 // # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
 // the public API prevents misuse of the pointers.
-unsafe impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Send
+unsafe impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> Send
     for ChannelBufferRef<'a, T, CHANNELS>
 {
 }
 // # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
 // the public API prevents misuse of the pointers.
-unsafe impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Sync
+unsafe impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> Sync
     for ChannelBufferRef<'a, T, CHANNELS>
 {
 }
@@ -241,13 +243,15 @@ unsafe impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Sync
 ///
 /// This version uses a reference to a slice as its data source.
 #[derive(Debug)]
-pub struct ChannelBufferRefMut<'a, T: Clone + Copy + Default, const CHANNELS: usize> {
+pub struct ChannelBufferRefMut<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> {
     data: &'a mut [T],
     offsets: [*mut T; CHANNELS],
     frames: usize,
 }
 
-impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'a, T, CHANNELS> {
+impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize>
+    ChannelBufferRefMut<'a, T, CHANNELS>
+{
     const _COMPILE_TIME_ASSERTS: () = {
         assert!(CHANNELS > 0);
     };
@@ -558,7 +562,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> ChannelBufferRefMut<'
     }
 }
 
-impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Index<usize>
+impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> Index<usize>
     for ChannelBufferRefMut<'a, T, CHANNELS>
 {
     type Output = [T];
@@ -569,7 +573,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Index<usize>
     }
 }
 
-impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> IndexMut<usize>
+impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> IndexMut<usize>
     for ChannelBufferRefMut<'a, T, CHANNELS>
 {
     #[inline(always)]
@@ -578,7 +582,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> IndexMut<usize>
     }
 }
 
-impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Default
+impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> Default
     for ChannelBufferRefMut<'a, T, CHANNELS>
 {
     fn default() -> Self {
@@ -586,8 +590,8 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Default
     }
 }
 
-impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Into<ChannelBufferRef<'a, T, CHANNELS>>
-    for ChannelBufferRefMut<'a, T, CHANNELS>
+impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize>
+    Into<ChannelBufferRef<'a, T, CHANNELS>> for ChannelBufferRefMut<'a, T, CHANNELS>
 {
     #[inline(always)]
     fn into(self) -> ChannelBufferRef<'a, T, CHANNELS> {
@@ -600,7 +604,7 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Into<ChannelBufferRef
     }
 }
 
-impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Into<&'a mut [T]>
+impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> Into<&'a mut [T]>
     for ChannelBufferRefMut<'a, T, CHANNELS>
 {
     fn into(self) -> &'a mut [T] {
@@ -610,13 +614,13 @@ impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Into<&'a mut [T]>
 
 // # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
 // the public API prevents misuse of the pointers.
-unsafe impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Send
+unsafe impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> Send
     for ChannelBufferRefMut<'a, T, CHANNELS>
 {
 }
 // # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
 // the public API prevents misuse of the pointers.
-unsafe impl<'a, T: Clone + Copy + Default, const CHANNELS: usize> Sync
+unsafe impl<'a, T: Clone + Copy + Default + Sized, const CHANNELS: usize> Sync
     for ChannelBufferRefMut<'a, T, CHANNELS>
 {
 }

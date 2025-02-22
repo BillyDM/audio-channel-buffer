@@ -9,13 +9,13 @@ use crate::{ChannelBufferRef, ChannelBufferRefMut};
 ///
 /// This version uses an owned `Vec` as its data source.
 #[derive(Debug)]
-pub struct ChannelBuffer<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> {
+pub struct ChannelBuffer<T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize> {
     data: Pin<Vec<T>>,
     offsets: [*mut T; CHANNELS],
     frames: usize,
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> ChannelBuffer<T, CHANNELS> {
+impl<T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize> ChannelBuffer<T, CHANNELS> {
     const _COMPILE_TIME_ASSERTS: () = {
         assert!(CHANNELS > 0);
     };
@@ -356,7 +356,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> ChannelBu
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Index<usize>
+impl<T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize> Index<usize>
     for ChannelBuffer<T, CHANNELS>
 {
     type Output = [T];
@@ -367,7 +367,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Index<usi
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> IndexMut<usize>
+impl<T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize> IndexMut<usize>
     for ChannelBuffer<T, CHANNELS>
 {
     #[inline(always)]
@@ -376,7 +376,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> IndexMut<
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Default
+impl<T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize> Default
     for ChannelBuffer<T, CHANNELS>
 {
     fn default() -> Self {
@@ -384,7 +384,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Default
     }
 }
 
-impl<'a, T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize>
+impl<'a, T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize>
     Into<ChannelBufferRef<'a, T, CHANNELS>> for &'a ChannelBuffer<T, CHANNELS>
 {
     #[inline(always)]
@@ -393,7 +393,7 @@ impl<'a, T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize>
     }
 }
 
-impl<'a, T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize>
+impl<'a, T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize>
     Into<ChannelBufferRefMut<'a, T, CHANNELS>> for &'a mut ChannelBuffer<T, CHANNELS>
 {
     #[inline(always)]
@@ -402,7 +402,7 @@ impl<'a, T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize>
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Into<Vec<T>>
+impl<T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize> Into<Vec<T>>
     for ChannelBuffer<T, CHANNELS>
 {
     fn into(self) -> Vec<T> {
@@ -410,7 +410,7 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Into<Vec<
     }
 }
 
-impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Clone
+impl<T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize> Clone
     for ChannelBuffer<T, CHANNELS>
 {
     fn clone(&self) -> Self {
@@ -425,13 +425,13 @@ impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Clone
 
 // # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
 // the public API prevents misuse of the pointers.
-unsafe impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Send
+unsafe impl<T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize> Send
     for ChannelBuffer<T, CHANNELS>
 {
 }
 // # SAFETY: All the stored pointers are valid for the lifetime of the struct, and
 // the public API prevents misuse of the pointers.
-unsafe impl<T: Clone + Copy + Default + Unpin + Sized, const CHANNELS: usize> Sync
+unsafe impl<T: Clone + Copy + Default + Sized + Unpin, const CHANNELS: usize> Sync
     for ChannelBuffer<T, CHANNELS>
 {
 }
