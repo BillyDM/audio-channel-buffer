@@ -3,6 +3,8 @@
 [![Crates.io](https://img.shields.io/crates/v/audio-channel-buffer.svg)](https://crates.io/crates/audio-channel-buffer)
 [![License](https://img.shields.io/crates/l/audio-channel-buffer.svg)](https://github.com/BillyDM/audio-channel-buffer/blob/main/LICENSE)
 
+> This project has moved to [Codeberg](https://codeberg.org/BillyDM/audio-channel-buffer).
+
 A collection of memory-efficient audio buffer types for realtime applications. These may have better cache efficiency and take up less memory than `Vec<Vec<T>>`.
 
 This library can be used with or without the standard library and with or without an allocator.
